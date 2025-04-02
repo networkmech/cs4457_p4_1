@@ -1,0 +1,69 @@
+{
+  "target": "bmv2",
+  "p4info": "build/vpn.p4.p4info.txt",
+  "bmv2_json": "build/vpn.json",
+  "table_entries": [ 
+    {
+      "table": "MyIngress.routing_table",
+      "match": {
+        "hdr.ipv4.dstAddr": ["5.1.1.30", 32]
+      },
+      "action_name": "MyIngress.forward",
+      "action_params": {
+          "output_port": 1,
+          "is_going_to_internet": 0
+      }
+    },
+    {
+      "table": "MyIngress.routing_table",
+      "match": {
+        "hdr.ipv4.dstAddr": ["5.1.1.40", 32]
+      },
+      "action_name": "MyIngress.forward",
+      "action_params": {
+          "output_port": 2,
+          "is_going_to_internet": 0
+      }
+    },
+    {
+      "table": "MyIngress.srcIP_conversion_table",
+      "match": {
+        "hdr.ipv4.srcAddr": ["5.1.1.30", 32]
+      },
+      "action_name": "MyIngress.set_meta_outer_srcIP",
+      "action_params": {
+          "outer_srcIP": "20.1.1.10"
+      }
+    },
+    {
+      "table": "MyIngress.srcIP_conversion_table",
+      "match": {
+        "hdr.ipv4.srcAddr": ["5.1.1.40", 32]
+      },
+      "action_name": "MyIngress.set_meta_outer_srcIP",
+      "action_params": {
+          "outer_srcIP": "20.1.1.20"
+      }
+    },
+    {
+      "table": "MyIngress.dstIP_conversion_table",
+      "match": {
+        "hdr.ipv4.dstAddr": ["5.1.1.10", 32]
+      },
+      "action_name": "MyIngress.set_meta_outer_dstIP",
+      "action_params": {
+          "outer_dstIP": "10.1.1.10"
+      }
+    },
+    {
+      "table": "MyIngress.dstIP_conversion_table",
+      "match": {
+        "hdr.ipv4.dstAddr": ["5.1.1.20", 32]
+      },
+      "action_name": "MyIngress.set_meta_outer_dstIP",
+      "action_params": {
+          "outer_dstIP": "10.1.1.20"
+      }
+    }
+ ]
+}

@@ -1,0 +1,29 @@
+{
+  "target": "bmv2",
+  "p4info": "build/vpn.p4.p4info.txt",
+  "bmv2_json": "build/vpn.json",
+  "table_entries": [ 
+    {
+      "table": "MyIngress.middle_rtr_table",
+      "match": {
+        "hdr.ipv4.dstAddr": ["10.1.1.0", 24]
+      },
+      "action_name": "MyIngress.mark_and_forward",
+      "action_params": {
+          "mark_middle": 1,
+          "output_port": 1
+      }
+    },
+    {
+      "table": "MyIngress.middle_rtr_table",
+      "match": {
+        "hdr.ipv4.dstAddr": ["20.1.1.0", 24]
+      },
+      "action_name": "MyIngress.mark_and_forward",
+      "action_params": {
+          "mark_middle": 1,
+          "output_port": 2
+      }
+    } 
+ ]
+}
