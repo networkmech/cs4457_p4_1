@@ -89,6 +89,32 @@
         "port": 3,
         "dst_ip_is_local": 0
       }
+    },
+    {
+      "table": "MyIngress.arp_cache_table",
+      "match": {
+        "hdr.ipv4.dstAddr": [
+          "2.2.2.10",
+          32
+        ]
+      },
+      "action_name": "MyIngress.set_dmac",
+      "action_params": {
+        "dstAddr": "08:00:00:00:02:01"
+      }
+    },
+    {
+      "table": "MyIngress.arp_cache_table",
+      "match": {
+        "hdr.ipv4.dstAddr": [
+          "2.2.2.20",
+          32
+        ]
+      },
+      "action_name": "MyIngress.set_dmac",
+      "action_params": {
+        "dstAddr": "08:00:00:00:02:02"
+      }
     }
   ]
 }

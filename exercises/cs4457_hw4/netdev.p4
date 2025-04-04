@@ -191,6 +191,10 @@ control MyIngress(inout headers hdr,
         meta.dst_ip_is_local = dst_ip_is_local;
     }
 
+    action set_dmac(macAddr_t dstAddr) {
+        hdr.ethernet.dstAddr = dstAddr;
+    }
+
     table src_ipv4_lpm {
         key = {
             hdr.ipv4.srcAddr: lpm;
@@ -216,6 +220,20 @@ control MyIngress(inout headers hdr,
         size = 1024;
         default_action = drop();
     }
+
+
+    table arp_cache_table {
+        key = {
+            hdr.ipv4.dstAddr: lpm;
+        }
+        actions = {
+            set_dmac;
+            NoAction;
+        }
+        size = 1024;
+        default_action = NoAction();
+    }
+
 
     table l2_or_l3_table {
         key = {
@@ -269,25 +287,26 @@ control MyIngress(inout headers hdr,
 
             src_ipv4_lpm.apply();
 
-            if (meta.src_ip_is_local == 1) {
-//                bit<32> save_ip_key;
-                //hash(save_ip_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ipv4.srcAddr}, (bit<32>)1024);
-                //arp_cache.write(save_ip_key, hdr.ethernet.srcAddr);
-                arp_cache.write(hdr.ipv4.srcAddr, hdr.ethernet.srcAddr);
-            }
-
-//            hash(save_ip_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ethernet.srcAddr}, (bit<32>)1024);
-//            arp_cache.write(save_ip_key, hdr.ethernet.srcAddr);
+//            if (meta.src_ip_is_local == 1) {
+////                bit<32> save_ip_key;
+//                //hash(save_ip_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ipv4.srcAddr}, (bit<32>)1024);
+//                //arp_cache.write(save_ip_key, hdr.ethernet.srcAddr);
+//                arp_cache.write(hdr.ipv4.srcAddr, hdr.ethernet.srcAddr);
+//            }
+//
+////            hash(save_ip_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ethernet.srcAddr}, (bit<32>)1024);
+////            arp_cache.write(save_ip_key, hdr.ethernet.srcAddr);
 
             dst_ipv4_lpm.apply();
 
             // if destination IP is for local subnet, lookup ARP cache
             if (meta.dst_ip_is_local == 1) {        
                 bit<48> MacDstAddr;
+                arp_cache_table.apply();
                 //hash(lookup_ip_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ipv4.dstAddr}, (bit<32>)1024);
-                arp_cache.read(MacDstAddr, (bit<32>)hdr.ipv4.dstAddr);
+                //arp_cache.read(MacDstAddr, (bit<32>)hdr.ipv4.dstAddr);
                 //arp_cache.read(MacDstAddr, lookup_ip_key);
-                hdr.ethernet.dstAddr = MacDstAddr;
+                //hdr.ethernet.dstAddr = MacDstAddr;
             }
         }
 
