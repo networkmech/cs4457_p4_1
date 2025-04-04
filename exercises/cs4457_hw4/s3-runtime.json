@@ -1,69 +1,57 @@
 {
   "target": "bmv2",
-  "p4info": "build/vpn.p4.p4info.txt",
-  "bmv2_json": "build/vpn.json",
-  "table_entries": [ 
+  "p4info": "build/netdev.p4.p4info.txtpb",
+  "bmv2_json": "build/netdev.json",
+  "table_entries": [
     {
-      "table": "MyIngress.routing_table",
+      "table": "MyIngress.l2_or_l3_table",
       "match": {
-        "hdr.ipv4.dstAddr": ["5.1.1.30", 32]
+          "standard_metadata.ingress_port": [1]
       },
-      "action_name": "MyIngress.forward",
+      "action_name": "MyIngress.device_mark",
       "action_params": {
-          "output_port": 1,
-          "is_going_to_internet": 0
+          "device_type": 2
       }
     },
     {
-      "table": "MyIngress.routing_table",
+      "table": "MyIngress.l2_or_l3_table",
       "match": {
-        "hdr.ipv4.dstAddr": ["5.1.1.40", 32]
+          "standard_metadata.ingress_port": [2]
       },
-      "action_name": "MyIngress.forward",
+      "action_name": "MyIngress.device_mark",
       "action_params": {
-          "output_port": 2,
-          "is_going_to_internet": 0
+          "device_type": 2
       }
     },
     {
-      "table": "MyIngress.srcIP_conversion_table",
+      "table": "MyIngress.l2_or_l3_table",
       "match": {
-        "hdr.ipv4.srcAddr": ["5.1.1.30", 32]
+          "standard_metadata.ingress_port": [3]
       },
-      "action_name": "MyIngress.set_meta_outer_srcIP",
+      "action_name": "MyIngress.device_mark",
       "action_params": {
-          "outer_srcIP": "20.1.1.10"
+          "device_type": 2
       }
-    },
+    } 
+  ],
+  "multicast_group_entries": [
     {
-      "table": "MyIngress.srcIP_conversion_table",
-      "match": {
-        "hdr.ipv4.srcAddr": ["5.1.1.40", 32]
-      },
-      "action_name": "MyIngress.set_meta_outer_srcIP",
-      "action_params": {
-          "outer_srcIP": "20.1.1.20"
-      }
-    },
-    {
-      "table": "MyIngress.dstIP_conversion_table",
-      "match": {
-        "hdr.ipv4.dstAddr": ["5.1.1.10", 32]
-      },
-      "action_name": "MyIngress.set_meta_outer_dstIP",
-      "action_params": {
-          "outer_dstIP": "10.1.1.10"
-      }
-    },
-    {
-      "table": "MyIngress.dstIP_conversion_table",
-      "match": {
-        "hdr.ipv4.dstAddr": ["5.1.1.20", 32]
-      },
-      "action_name": "MyIngress.set_meta_outer_dstIP",
-      "action_params": {
-          "outer_dstIP": "10.1.1.20"
-      }
+      "multicast_group_id": 1,  
+      "replicas": [
+        {
+          "egress_port": 1,
+          "instance": 1
+        },
+        {
+          "egress_port": 2,
+          "instance": 1
+        },
+        {
+          "egress_port": 3,
+          "instance": 1
+        }
+      ]
     }
- ]
+  ]
+
 }

@@ -3,11 +3,13 @@
 #include <v1model.p4>
 
 const bit<16> TYPE_IPV4 = 0x800;
+const bit<16> TYPE_ARP = 0x806;
 
-const bit<8> TYPE_ESP = 0x32;
 const bit<8> TYPE_ICMP = 0x01;
 
-#define MAX_FLOWS   1024
+#define MAC_TABLE_SIZE  1024
+#define L2_TYPE         2
+#define L3_TYPE         3
 
 
 /*************************************************************************
@@ -23,6 +25,14 @@ header ethernet_t {
     macAddr_t dstAddr;
     macAddr_t srcAddr;
     bit<16>   etherType;
+}
+
+header arp_rarp_t {
+    bit<16> hwType;
+    bit<16> protoType;
+    bit<8> hwAddrLen;
+    bit<8> protoAddrLen;
+    bit<16> opcode;
 }
 
 header ipv4_t {
@@ -45,45 +55,16 @@ header icmp_t {
     bit<16> hdrChecksum;
 }
 
-header esp_t {
-    bit<32> spi;
-    bit<32> sequenceNumber;
-}
-
-header innerip_t {
-    bit<32> srcAddr;
-    bit<32> dstAddr;
-    bit<8>  protocol;
-}
-
-header esptrail_t {
-    bit<8>  pad;
-    bit<8>  pad_length;
-    bit<8>  nextHdr;
-}
-
-header icmp_esptrail_t {
-    bit<16> typeCode;
-    bit<16> hdrChecksum;
-    bit<8>  pad;
-    bit<8>  pad_length;
-    bit<8>  nextHdr;
-}
-
-
 struct metadata {
-    bit<32> outer_srcIP;
-    bit<32> outer_dstIP;
-    bit<8> is_going_to_internet;
-    bit<8> is_middle_rtr;
+    bit<32> network_device_type;
+    bit<8> src_ip_is_local;
+    bit<8> dst_ip_is_local;
 }
 
 struct headers {
     ethernet_t      ethernet;
+    arp_rarp_t       arp;
     ipv4_t          ipv4;
-    esp_t           espFrontHdr;
-    innerip_t       innerIPHdr;
-    esptrail_t     espTrailHdr;
     icmp_t          icmp;
 }
 
@@ -104,6 +85,7 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
             TYPE_IPV4: parse_ipv4;
+            TYPE_ARP: parse_arp;
             default: accept;
         }
     }
@@ -125,6 +107,11 @@ parser MyParser(packet_in packet,
     // Reading through the MRI example online should help too:
     // https://github.com/networkmech/p4tutorials/tree/master/exercises/mri
   
+    state parse_arp {
+        packet.extract(hdr.arp);
+        transition accept;
+    }
+
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
@@ -147,12 +134,6 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.icmp);
         transition accept;
     }
-
-    state parse_icmp_then_esp_trailer {
-        packet.extract(hdr.icmp);
-        packet.extract(hdr.espTrailHdr);
-        transition accept;
-    }
 }
 
 /*************************************************************************
@@ -172,103 +153,147 @@ control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
 
+    register<bit<9>>(MAC_TABLE_SIZE) mac_table;
+    register<bit<48>>(1024) arp_cache;
 
     action drop() {
         standard_metadata.egress_spec = 0;
     }
 
-    action mark_and_forward(bit<8> mark_middle, bit<9> output_port) {
-        meta.is_middle_rtr = mark_middle;
-        standard_metadata.egress_spec = output_port;
+    action device_mark(bit<32> device_type) {
+        meta.network_device_type = device_type;
     }
 
-    action forward(bit<9> output_port, bit<8> is_going_to_internet) {
-        standard_metadata.egress_spec = output_port;
-        meta.is_going_to_internet = is_going_to_internet;
+    action mark_src_local() {
+        meta.src_ip_is_local = 1;
     }
 
-    action set_meta_outer_srcIP(bit<32> outer_srcIP) {
-        meta.outer_srcIP = outer_srcIP ;
+    action ipv4_forward(macAddr_t dstAddr, egressSpec_t port, bit<8> dst_ip_is_local) {
+        /*
+            Action function for forwarding IPv4 packets.
+
+            This function is responsible for forwarding IPv4 packets to the specified
+            destination MAC address and egress port.
+
+            Parameters:
+            - dstAddr: Destination MAC address of the packet.
+            - port: Egress port where the packet should be forwarded.
+
+            TODO: Implement the logic for forwarding the IPv4 packet based on the
+            destination MAC address and egress port.
+        */
+
+        standard_metadata.egress_spec = port;
+        hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
+        hdr.ethernet.dstAddr = dstAddr;
+        hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
+
+        meta.dst_ip_is_local = dst_ip_is_local;
     }
 
-    action set_meta_outer_dstIP(bit<32> outer_dstIP) {
-        meta.outer_dstIP = outer_dstIP ;
-    }
-
-    table srcIP_conversion_table {
+    table src_ipv4_lpm {
         key = {
             hdr.ipv4.srcAddr: lpm;
         }
         actions = {
-            set_meta_outer_srcIP;
-            NoAction;
-        }
-        size = MAX_FLOWS;
-        default_action = NoAction;
-    }
-
-    table dstIP_conversion_table {
-        key = {
-            hdr.ipv4.dstAddr: lpm;
-        }
-        actions = {
-            set_meta_outer_dstIP;
-            NoAction;
-        }
-        size = MAX_FLOWS;
-        default_action = NoAction;
-    }
-
-    table routing_table {
-        key = {
-            hdr.ipv4.dstAddr: lpm;
-        }
-        actions = {
+            mark_src_local;
             drop;
-            forward;
-            NoAction;
         }
-        size = MAX_FLOWS;
-        default_action = forward(3,1);
+        size = 1024;
+        default_action = drop();
     }
 
-    table middle_rtr_table {
+
+    table dst_ipv4_lpm {
         key = {
             hdr.ipv4.dstAddr: lpm;
         }
         actions = {
-            mark_and_forward;
+            ipv4_forward;
+            drop;
             NoAction;
         }
-        size = MAX_FLOWS;
-        default_action = NoAction;
+        size = 1024;
+        default_action = drop();
+    }
+
+    table l2_or_l3_table {
+        key = {
+            standard_metadata.ingress_port: exact;
+        }
+        actions = {
+            device_mark;
+            NoAction;
+        }
+        size = 10;
+        default_action = NoAction();
     }
 
     apply {
+ 
+        bit<9> output_port = 0;
+        bit<32> lookup_key;
+        bit<32> save_key;
 
-        // if header ethernet and IPv4 exist and are valid,
-        if (hdr.ethernet.isValid() && hdr.ipv4.isValid()) {
+        l2_or_l3_table.apply();
 
+        // if L2 router
+        if (meta.network_device_type == L2_TYPE && hdr.ethernet.isValid()) {
+            hash(lookup_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ethernet.dstAddr}, (bit<32>)MAC_TABLE_SIZE);
+            hash(save_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ethernet.srcAddr}, (bit<32>)MAC_TABLE_SIZE);
+    
+            // save to mac table.
+            mac_table.write(save_key, standard_metadata.ingress_port);
 
-
-
-            if (hdr.ethernet.dstAddr == "ff:ff:ff:ff:ff:ff") {
-                // broadcast
+            // if broadcast, broadcast.
+            if (hdr.ethernet.dstAddr == 0xffffffffffff) {
                 standard_metadata.mcast_grp = 1;
             }
-
             else {
                 // lookup register
-                //
+                mac_table.read(output_port, lookup_key);
+    
+                // if found, set egress port based on retrieved info.
+                if (output_port > 0) {
+                    standard_metadata.egress_spec = output_port;
+                }
+                // if not found in mac_table, flood
+                else {
+                    standard_metadata.mcast_grp = 1;
+                }
             }
-                if {
-                //look up register
-                // forward
+        }
+
+        // else if, L3 router
+        else if (meta.network_device_type == L3_TYPE && hdr.ethernet.isValid() && hdr.ipv4.isValid()) {
+
+            src_ipv4_lpm.apply();
+
+            if (meta.src_ip_is_local == 1) {
+//                bit<32> save_ip_key;
+                //hash(save_ip_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ipv4.srcAddr}, (bit<32>)1024);
+                //arp_cache.write(save_ip_key, hdr.ethernet.srcAddr);
+                arp_cache.write(hdr.ipv4.srcAddr, hdr.ethernet.srcAddr);
             }
 
-            else {
-                drop();
+//            hash(save_ip_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ethernet.srcAddr}, (bit<32>)1024);
+//            arp_cache.write(save_ip_key, hdr.ethernet.srcAddr);
+
+            dst_ipv4_lpm.apply();
+
+            // if destination IP is for local subnet, lookup ARP cache
+            if (meta.dst_ip_is_local == 1) {        
+                bit<48> MacDstAddr;
+                //hash(lookup_ip_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ipv4.dstAddr}, (bit<32>)1024);
+                arp_cache.read(MacDstAddr, (bit<32>)hdr.ipv4.dstAddr);
+                //arp_cache.read(MacDstAddr, lookup_ip_key);
+                hdr.ethernet.dstAddr = MacDstAddr;
             }
+        }
+
+        // else, drop packet.
+        else {
+            drop();
         }
     }
 }
@@ -314,14 +339,9 @@ control MyComputeChecksum(inout headers  hdr, inout metadata meta) {
 control MyDeparser(packet_out packet, in headers hdr) {
     apply {
     packet.emit(hdr.ethernet);
+    packet.emit(hdr.arp);
     packet.emit(hdr.ipv4);
-
-    // ESP headers will be attached 
-    // automatically when set to valid
-    packet.emit(hdr.espFrontHdr);
-    packet.emit(hdr.innerIPHdr);
     packet.emit(hdr.icmp);
-    packet.emit(hdr.espTrailHdr);
     }
 }
 

@@ -1,29 +1,57 @@
 {
   "target": "bmv2",
-  "p4info": "build/vpn.p4.p4info.txt",
-  "bmv2_json": "build/vpn.json",
-  "table_entries": [ 
+  "p4info": "build/netdev.p4.p4info.txtpb",
+  "bmv2_json": "build/netdev.json",
+  "table_entries": [
     {
-      "table": "MyIngress.middle_rtr_table",
+      "table": "MyIngress.l2_or_l3_table",
       "match": {
-        "hdr.ipv4.dstAddr": ["10.1.1.0", 24]
+          "standard_metadata.ingress_port": [1]
       },
-      "action_name": "MyIngress.mark_and_forward",
+      "action_name": "MyIngress.device_mark",
       "action_params": {
-          "mark_middle": 1,
-          "output_port": 1
+          "device_type": 2
       }
     },
     {
-      "table": "MyIngress.middle_rtr_table",
+      "table": "MyIngress.l2_or_l3_table",
       "match": {
-        "hdr.ipv4.dstAddr": ["20.1.1.0", 24]
+          "standard_metadata.ingress_port": [2]
       },
-      "action_name": "MyIngress.mark_and_forward",
+      "action_name": "MyIngress.device_mark",
       "action_params": {
-          "mark_middle": 1,
-          "output_port": 2
+          "device_type": 2
+      }
+    },
+    {
+      "table": "MyIngress.l2_or_l3_table",
+      "match": {
+          "standard_metadata.ingress_port": [3]
+      },
+      "action_name": "MyIngress.device_mark",
+      "action_params": {
+          "device_type": 2
       }
     } 
- ]
+  ],
+  "multicast_group_entries": [
+    {
+      "multicast_group_id": 1,  
+      "replicas": [
+        {
+          "egress_port": 1,
+          "instance": 1
+        },
+        {
+          "egress_port": 2,
+          "instance": 1
+        },
+        {
+          "egress_port": 3,
+          "instance": 1
+        }
+      ]
+    }
+  ]
+
 }

@@ -1,0 +1,94 @@
+{
+  "target": "bmv2",
+  "p4info": "build/netdev.p4.p4info.txtpb",
+  "bmv2_json": "build/netdev.json",
+  "table_entries": [
+    {
+      "table": "MyIngress.l2_or_l3_table",
+      "match": {
+          "standard_metadata.ingress_port": [1]
+      },
+      "action_name": "MyIngress.device_mark",
+      "action_params": {
+          "device_type": 3
+      }
+    },
+    {
+      "table": "MyIngress.l2_or_l3_table",
+      "match": {
+          "standard_metadata.ingress_port": [2]
+      },
+      "action_name": "MyIngress.device_mark",
+      "action_params": {
+          "device_type": 3
+      }
+    },
+    {
+      "table": "MyIngress.l2_or_l3_table",
+      "match": {
+          "standard_metadata.ingress_port": [3]
+      },
+      "action_name": "MyIngress.device_mark",
+      "action_params": {
+          "device_type": 3
+      }
+    },
+    {
+      "table": "MyIngress.src_ipv4_lpm",
+      "match": {
+        "hdr.ipv4.srcAddr": [
+          "2.2.2.0",
+          24
+        ]
+      },
+      "action_name": "MyIngress.mark_src_local",
+      "action_params": {
+      }
+    },
+    {
+      "table": "MyIngress.dst_ipv4_lpm",
+      "match": {
+        "hdr.ipv4.dstAddr": [
+          "1.1.1.0",
+          24
+        ]
+      },
+      "action_name": "MyIngress.ipv4_forward",
+      "action_params": {
+        "dstAddr": "08:00:00:00:02:00",
+        "port": 2,
+        "dst_ip_is_local": 0
+      }
+    },
+    {
+      "table": "MyIngress.dst_ipv4_lpm",
+      "match": {
+        "hdr.ipv4.dstAddr": [
+          "2.2.2.0",
+          24
+        ]
+      },
+      "action_name": "MyIngress.ipv4_forward",
+      "action_params": {
+        "dstAddr": "08:00:00:00:02:00",
+        "port": 1,
+        "dst_ip_is_local": 1
+      }
+    },
+    {
+      "table": "MyIngress.dst_ipv4_lpm",
+      "match": {
+        "hdr.ipv4.dstAddr": [
+          "3.3.3.0",
+          24
+        ]
+      },
+      "action_name": "MyIngress.ipv4_forward",
+      "action_params": {
+        "dstAddr": "08:00:00:00:03:00",
+        "port": 3,
+        "dst_ip_is_local": 0
+      }
+    }
+  ]
+}
