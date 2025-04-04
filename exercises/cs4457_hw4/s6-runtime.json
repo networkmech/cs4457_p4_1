@@ -34,18 +34,6 @@
       }
     },
     {
-      "table": "MyIngress.src_ipv4_lpm",
-      "match": {
-        "hdr.ipv4.srcAddr": [
-          "3.3.3.0",
-          24
-        ]
-      },
-      "action_name": "MyIngress.mark_src_local",
-      "action_params": {
-      }
-    },
-    {
       "table": "MyIngress.dst_ipv4_lpm",
       "match": {
         "hdr.ipv4.dstAddr": [

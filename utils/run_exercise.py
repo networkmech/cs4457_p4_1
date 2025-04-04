@@ -201,8 +201,8 @@ class ExerciseRunner:
         sleep(1)
 
         # some programming that must happen after the net has started
-        self.program_hosts()
         self.program_switches()
+        self.program_hosts()
 
         # wait for that to finish. Not sure how to do this better
         sleep(1)

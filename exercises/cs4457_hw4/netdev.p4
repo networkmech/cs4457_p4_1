@@ -2,10 +2,12 @@
 #include <core.p4>
 #include <v1model.p4>
 
+
 const bit<16> TYPE_IPV4 = 0x800;
 const bit<16> TYPE_ARP = 0x806;
 
 const bit<8> TYPE_ICMP = 0x01;
+const bit<8> TYPE_TCP = 0x06;
 
 #define MAC_TABLE_SIZE  1024
 #define L2_TYPE         2
@@ -55,17 +57,32 @@ header icmp_t {
     bit<16> hdrChecksum;
 }
 
+header tcp_t {
+    bit<16> srcPort;
+    bit<16> dstPort;
+    bit<32> seqNo;
+    bit<32> ackNo;
+    bit<4>  dataOffset;
+    bit<3>  res;
+    bit<3>  ecn;
+    bit<6>  ctrl;
+    bit<16> window;
+    bit<16> checksum;
+    bit<16> urgentPtr;
+}
+
+
 struct metadata {
     bit<32> network_device_type;
-    bit<8> src_ip_is_local;
     bit<8> dst_ip_is_local;
 }
 
 struct headers {
     ethernet_t      ethernet;
-    arp_rarp_t       arp;
+    arp_rarp_t      arp;
     ipv4_t          ipv4;
     icmp_t          icmp;
+    tcp_t           tcp;
 }
 
 /*************************************************************************
@@ -93,19 +110,13 @@ parser MyParser(packet_in packet,
     // ##### YOUR CODE HERE 1 - START #####
 
     // HINT: 
-    // You need to make some updates to the parse_ipv4 parser state,
-    // and also add another parser state.
-    // 
+    // You need to add parser states for ARP, IPv4, TCP, and ICMP.
+    //
     // Think about different packet types that 
-    // would arrive at the routers. You have to parse them
+    // could arrive at swtiches and routers. You have to parse them
     // correctly.
     //
-    // In general, for this whole homework,
-    // the MRI tutorial example will be a good reference to check.
-    // This is because the MRI example also deals with custom headers.
-    // Check at: p4tutorials/exercises/mri/solution/mri.p4
-    // Reading through the MRI example online should help too:
-    // https://github.com/networkmech/p4tutorials/tree/master/exercises/mri
+    // HINT: TCP or ICMP comes after the IP header.
   
     state parse_arp {
         packet.extract(hdr.arp);
@@ -115,25 +126,23 @@ parser MyParser(packet_in packet,
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
+            TYPE_TCP: parse_tcp;
             TYPE_ICMP: parse_icmp;
             default: accept;
         }
     }
-
-    // HINT: 
-    // Normally, we should look up the IP protocol type (e.g., ICMP),
-    // which is saved in the ESP trailer header's nextHdr field. Only after knowing that,
-    // the parser can parse the transport layer fields correctly (e.g., ICMP header). 
-    //
-    // But for the sake of this homework, it is fine to check the
-    // value in hdr.innerIPHdr.protocol.
-
-    // ##### YOUR CODE HERE 1 - END #####
     
     state parse_icmp {
         packet.extract(hdr.icmp);
         transition accept;
     }
+
+    state parse_tcp {
+        packet.extract(hdr.tcp);
+        transition accept;
+    }
+
+    // ##### YOUR CODE HERE 1 - END #####
 }
 
 /*************************************************************************
@@ -154,7 +163,6 @@ control MyIngress(inout headers hdr,
                   inout standard_metadata_t standard_metadata) {
 
     register<bit<9>>(MAC_TABLE_SIZE) mac_table;
-    register<bit<48>>(1024) arp_cache;
 
     action drop() {
         standard_metadata.egress_spec = 0;
@@ -162,10 +170,6 @@ control MyIngress(inout headers hdr,
 
     action device_mark(bit<32> device_type) {
         meta.network_device_type = device_type;
-    }
-
-    action mark_src_local() {
-        meta.src_ip_is_local = 1;
     }
 
     action ipv4_forward(macAddr_t dstAddr, egressSpec_t port, bit<8> dst_ip_is_local) {
@@ -195,19 +199,6 @@ control MyIngress(inout headers hdr,
         hdr.ethernet.dstAddr = dstAddr;
     }
 
-    table src_ipv4_lpm {
-        key = {
-            hdr.ipv4.srcAddr: lpm;
-        }
-        actions = {
-            mark_src_local;
-            drop;
-        }
-        size = 1024;
-        default_action = drop();
-    }
-
-
     table dst_ipv4_lpm {
         key = {
             hdr.ipv4.dstAddr: lpm;
@@ -221,7 +212,6 @@ control MyIngress(inout headers hdr,
         default_action = drop();
     }
 
-
     table arp_cache_table {
         key = {
             hdr.ipv4.dstAddr: lpm;
@@ -233,7 +223,6 @@ control MyIngress(inout headers hdr,
         size = 1024;
         default_action = NoAction();
     }
-
 
     table l2_or_l3_table {
         key = {
@@ -285,28 +274,11 @@ control MyIngress(inout headers hdr,
         // else if, L3 router
         else if (meta.network_device_type == L3_TYPE && hdr.ethernet.isValid() && hdr.ipv4.isValid()) {
 
-            src_ipv4_lpm.apply();
-
-//            if (meta.src_ip_is_local == 1) {
-////                bit<32> save_ip_key;
-//                //hash(save_ip_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ipv4.srcAddr}, (bit<32>)1024);
-//                //arp_cache.write(save_ip_key, hdr.ethernet.srcAddr);
-//                arp_cache.write(hdr.ipv4.srcAddr, hdr.ethernet.srcAddr);
-//            }
-//
-////            hash(save_ip_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ethernet.srcAddr}, (bit<32>)1024);
-////            arp_cache.write(save_ip_key, hdr.ethernet.srcAddr);
-
             dst_ipv4_lpm.apply();
 
             // if destination IP is for local subnet, lookup ARP cache
             if (meta.dst_ip_is_local == 1) {        
-                bit<48> MacDstAddr;
                 arp_cache_table.apply();
-                //hash(lookup_ip_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ipv4.dstAddr}, (bit<32>)1024);
-                //arp_cache.read(MacDstAddr, (bit<32>)hdr.ipv4.dstAddr);
-                //arp_cache.read(MacDstAddr, lookup_ip_key);
-                //hdr.ethernet.dstAddr = MacDstAddr;
             }
         }
 
@@ -361,6 +333,7 @@ control MyDeparser(packet_out packet, in headers hdr) {
     packet.emit(hdr.arp);
     packet.emit(hdr.ipv4);
     packet.emit(hdr.icmp);
+    packet.emit(hdr.tcp);
     }
 }
 
