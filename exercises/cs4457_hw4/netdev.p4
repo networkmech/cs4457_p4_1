@@ -2,7 +2,6 @@
 #include <core.p4>
 #include <v1model.p4>
 
-
 const bit<16> TYPE_IPV4 = 0x800;
 const bit<16> TYPE_ARP = 0x806;
 
@@ -70,7 +69,6 @@ header tcp_t {
     bit<16> checksum;
     bit<16> urgentPtr;
 }
-
 
 struct metadata {
     bit<32> network_device_type;
@@ -162,43 +160,60 @@ control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
 
+    /* The MAC table for L2 switches */
     register<bit<9>>(MAC_TABLE_SIZE) mac_table;
 
+    /* Action function to mark a packet for dropping */
     action drop() {
         standard_metadata.egress_spec = 0;
     }
 
+    /* Action function to mark a network device.  
+     *
+     * Parameters:
+     * - device_type: L2 (device_type = 2) or L3 (device_type = 3) 
+     */
     action device_mark(bit<32> device_type) {
         meta.network_device_type = device_type;
     }
 
+    /*
+        Action function for forwarding IPv4 packets.
+
+        This function is responsible for forwarding IPv4 packets to the specified
+        destination MAC address and egress port.
+
+        Parameters:
+        - dstAddr: Destination MAC address of the packet.
+        - port: Egress port where the packet should be forwarded.
+    */
     action ipv4_forward(macAddr_t dstAddr, egressSpec_t port, bit<8> dst_ip_is_local) {
-        /*
-            Action function for forwarding IPv4 packets.
-
-            This function is responsible for forwarding IPv4 packets to the specified
-            destination MAC address and egress port.
-
-            Parameters:
-            - dstAddr: Destination MAC address of the packet.
-            - port: Egress port where the packet should be forwarded.
-
-            TODO: Implement the logic for forwarding the IPv4 packet based on the
-            destination MAC address and egress port.
-        */
-
         standard_metadata.egress_spec = port;
         hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
         hdr.ethernet.dstAddr = dstAddr;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
 
+        // If 0, this packet's destination is for some other L3 network.
+        // If 1, this packet's destination is the local network this L3 router is responsible for.
         meta.dst_ip_is_local = dst_ip_is_local;
     }
 
+    /* 
+     * Rewrite destination MAC to dstAddr 
+     *
+     * Parameters:
+     * - dstAddr: Destination MAC you want.
+     */
     action set_dmac(macAddr_t dstAddr) {
         hdr.ethernet.dstAddr = dstAddr;
     }
 
+    /* IPv4 forwarding table based on destination IP address 
+     *
+     * You don't have to populate the entries. 
+     * You have to apply this table somewhere.
+     *
+     */
     table dst_ipv4_lpm {
         key = {
             hdr.ipv4.dstAddr: lpm;
@@ -212,6 +227,12 @@ control MyIngress(inout headers hdr,
         default_action = drop();
     }
 
+    /* ARP cache table for L3 routers 
+     *
+     * You don't have to populate the entries. 
+     * You have to apply this table somewhere.
+     *
+     */
     table arp_cache_table {
         key = {
             hdr.ipv4.dstAddr: lpm;
@@ -224,6 +245,12 @@ control MyIngress(inout headers hdr,
         default_action = NoAction();
     }
 
+    /* Table to indicate whether this network device is a L2 switch or L3 router 
+     *
+     * You don't have to populate the entries. 
+     * You don't have to use this. It's already applied for you.
+     *
+     */ 
     table l2_or_l3_table {
         key = {
             standard_metadata.ingress_port: exact;
@@ -238,16 +265,37 @@ control MyIngress(inout headers hdr,
 
     apply {
  
+        // Output interface number you want to send this packet out.
         bit<9> output_port = 0;
+
+        // Hash key index for finding a MAC table entry
         bit<32> lookup_key;
+
+        // Hash key index for saving a MAC table entry
         bit<32> save_key;
 
+        // Apply the table to know if the packet entered
+        // a L2 switch or L3 router
         l2_or_l3_table.apply();
 
-        // if L2 router
+        /* This router, which the packet entered, is an L2 switch */ 
         if (meta.network_device_type == L2_TYPE && hdr.ethernet.isValid()) {
-            hash(lookup_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ethernet.dstAddr}, (bit<32>)MAC_TABLE_SIZE);
+
+            // Hash source MAC address and save to save_key 
             hash(save_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ethernet.srcAddr}, (bit<32>)MAC_TABLE_SIZE);
+
+            // Hash destination MAC address and save to lookup_key
+            hash(lookup_key, HashAlgorithm.crc32, (bit<32>)0, {hdr.ethernet.dstAddr}, (bit<32>)MAC_TABLE_SIZE);
+
+            /* ##### YOUR CODE HERE 2 - START #####
+             * 
+             * HINT: Think about what an L2 switch should do when it gets a packet. 
+             *
+             * A packet might be an ARP or ping (ICMP) packet.
+             * 
+             * Setting "standard_metadata.mcast_grp = 1" will make a packet broadcast.
+             *
+             */
     
             // save to mac table.
             mac_table.write(save_key, standard_metadata.ingress_port);
@@ -269,10 +317,18 @@ control MyIngress(inout headers hdr,
                     standard_metadata.mcast_grp = 1;
                 }
             }
+
+            /* ##### YOUR CODE HERE 2 - END ##### */
         }
 
-        // else if, L3 router
+        /* This router, which the packet entered, is an L3 router */ 
         else if (meta.network_device_type == L3_TYPE && hdr.ethernet.isValid() && hdr.ipv4.isValid()) {
+
+            /* ##### YOUR CODE HERE 3 - START ##### 
+             *
+             * HINT: Think about what an L3 router should do when it gets a packet. 
+             *
+             */
 
             dst_ipv4_lpm.apply();
 
@@ -280,9 +336,11 @@ control MyIngress(inout headers hdr,
             if (meta.dst_ip_is_local == 1) {        
                 arp_cache_table.apply();
             }
+
+            /* ##### YOUR CODE HERE 3 - END ##### */
         }
 
-        // else, drop packet.
+        /* This router, which the packet entered, is not known.*/ 
         else {
             drop();
         }
@@ -296,7 +354,7 @@ control MyIngress(inout headers hdr,
 control MyEgress(inout headers hdr,
                  inout metadata meta,
                  inout standard_metadata_t standard_metadata) {
-    apply {  }
+    apply {}
 }
 
 /*************************************************************************
